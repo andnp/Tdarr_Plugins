@@ -2,9 +2,9 @@
 module.exports.dependencies = ['axios@0.27.2', '@cospired/i18n-iso-languages'];
 // tdarrSkipTest
 const details = () => ({
-  id: 'Tdarr_Plugin_henk_Keep_Native_Lang_Plus_Eng',
+  id: 'custom_remove_langs',
   Stage: 'Pre-processing',
-  Name: 'Remove all langs except native and English',
+  Name: 'Custom - Remove all langs except native and English',
   Type: 'Audio',
   Operation: 'Transcode',
   Description: `This plugin will remove all language audio tracks except the 'native'
@@ -12,7 +12,7 @@ const details = () => ({
     'Native' languages are the ones that are listed on imdb. It does an API call to
     Radarr, Sonarr to check if the movie/series exists and grabs the IMDB id. As a last resort it
     falls back to the IMDB id in the filename.`,
-  Version: '1.01',
+  Version: '1.02',
   Tags: 'pre-processing,configurable',
   Inputs: [
     {
