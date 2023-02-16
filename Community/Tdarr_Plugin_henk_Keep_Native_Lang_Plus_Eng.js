@@ -1,7 +1,7 @@
 /* eslint-disable no-await-in-loop */
 module.exports.dependencies = ['axios@0.27.2', '@cospired/i18n-iso-languages'];
 // tdarrSkipTest
-const details = () => ({
+module.exports.details = () => ({
   id: 'custom_remove_langs',
   Stage: 'Pre-processing',
   Name: 'Custom - Remove all langs except native and English',
@@ -323,5 +323,4 @@ const plugin = async (file, librarySettings, inputs, otherArguments) => {
   return response;
 };
 
-module.exports.details = details;
 module.exports.plugin = plugin;
