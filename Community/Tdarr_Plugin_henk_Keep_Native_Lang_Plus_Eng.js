@@ -9,8 +9,8 @@ const details = () => ({
   Operation: 'Transcode',
   Description: `This plugin will remove all language audio tracks except the 'native'
      (requires TMDB api key) and English.
-    'Native' languages are the ones that are listed on imdb. It does an API call to 
-    Radarr, Sonarr to check if the movie/series exists and grabs the IMDB id. As a last resort it 
+    'Native' languages are the ones that are listed on imdb. It does an API call to
+    Radarr, Sonarr to check if the movie/series exists and grabs the IMDB id. As a last resort it
     falls back to the IMDB id in the filename.`,
   Version: '1.01',
   Tags: 'pre-processing,configurable',
@@ -30,11 +30,11 @@ const details = () => ({
     {
       name: 'priority',
       type: 'string',
-      defaultValue: 'Radarr',
+      defaultValue: 'radarr',
       inputUI: {
         type: 'text',
       },
-      tooltip: 'Priority for either Radarr or Sonarr. Leaving it empty defaults to Radarr first.'
+      tooltip: 'Priority for either radarr or sonarr. Leaving it empty defaults to radarr first.'
         + '\\nExample:\\n'
         + 'sonarr',
     },
