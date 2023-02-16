@@ -110,7 +110,7 @@ const errorHandler = (ret) => {
     return ret;
   }
   return handle;
-}
+};
 
 const processStreams = (result, file, user_langs) => {
   // eslint-disable-next-line import/no-unresolved
@@ -245,7 +245,7 @@ const getSonarrResult = async (file, inputs) => {
     if (show.path) {
       const sonarrTemp = show.path.replace(/\\/g, '/').split('/');
       const sonarrFolder = sonarrTemp[sonarrTemp.length - 1];
-      const tdarrTemp = filePath.split('/');
+      const tdarrTemp = file.meta.FileName.split('/');
       const tdarrFolder = tdarrTemp[tdarrTemp.length - 2];
       if (sonarrFolder === tdarrFolder) {
         result = show;
