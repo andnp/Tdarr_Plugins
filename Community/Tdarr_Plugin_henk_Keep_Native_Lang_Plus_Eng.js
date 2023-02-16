@@ -99,6 +99,19 @@ const response = {
   infoLog: '',
 };
 
+const errorHandler = (ret) => {
+  const handle = (err) => {
+    if (err.response) {
+      response.infoLog += `Error: ${err.response.status} \n`;
+      response.infoLog += `${err.response.data} \n`;
+    } else {
+      response.infoLog += `Error: ${err.message} \n`;
+    }
+    return ret;
+  }
+  return handle;
+}
+
 const processStreams = (result, file, user_langs) => {
   // eslint-disable-next-line import/no-unresolved
   const languages = require('@cospired/i18n-iso-languages');
@@ -177,48 +190,77 @@ const tmdbApi = async (filename, api_key, axios) => {
   }
 
   if (fileName) {
-    const result = await axios.get(`https://api.themoviedb.org/3/find/${fileName}?api_key=`
-      + `${api_key}&language=en-US&external_source=imdb_id`)
-      .then((resp) => (resp.data.movie_results.length > 0 ? resp.data.movie_results[0] : resp.data.tv_results[0]));
+    const url = `https://api.themoviedb.org/3/find/${fileName}?api_key=${api_key}&language=en-US&external_source=imdb_id`;
+    const result = await axios.get(url)
+      .then((resp) => (resp.data.movie_results.length > 0 ? resp.data.movie_results[0] : resp.data.tv_results[0]))
+      .catch(errorHandler(null));
 
     if (!result) {
       response.infoLog += '☒No IMDB result was found. \n';
     }
     return result;
   }
-  return null;
 };
 
-// eslint-disable-next-line consistent-return
-const parseArrResponse = async (body, filePath, arr) => {
-  // eslint-disable-next-line default-case
-  switch (arr) {
-    case 'radarr':
-      // filePath = file
-      for (let i = 0; i < body.length; i += 1) {
-        if (body[i].movieFile) {
-          if (body[i].movieFile.relativePath) {
-            if (body[i].movieFile.relativePath === filePath) {
-              return body[i];
-            }
-          }
-        }
-      }
-      break;
-    case 'sonarr':
-      // filePath = directory the file is in
-      for (let i = 0; i < body.length; i += 1) {
-        if (body[i].path) {
-          const sonarrTemp = body[i].path.replace(/\\/g, '/').split('/');
-          const sonarrFolder = sonarrTemp[sonarrTemp.length - 1];
-          const tdarrTemp = filePath.split('/');
-          const tdarrFolder = tdarrTemp[tdarrTemp.length - 2];
-          if (sonarrFolder === tdarrFolder) {
-            return body[i];
-          }
-        }
-      }
+const getRadarrResult = async (file, inputs) => {
+  if (!inputs.radarr_api_key) return null;
+
+  const api_response = await axios.get(`http://${inputs.radarr_url}/api/v3/movie?apiKey=${inputs.radarr_api_key}`)
+    .then(resp => resp.data)
+    .catch(errorHandler([]));
+
+  const movies = api_response
+    .filter(movie => movie.movieFile)
+    .filter(movie => movie.movieFile.relativePath)
+    .filter(movie => movie.movieFile.relativePath === file.meta.FileName);
+
+  if (movies.length === 0) {
+    response.infoLog += 'Couldn\'t grab ID from Radarr \n';
+    return null;
   }
+  if (movies.length > 1) {
+    response.infoLog += `Warning: found multiple matching movies from Radarr \n`;
+  }
+
+  const movie = movies[0];
+  response.infoLog += `Grabbed ID (${movie.imdbId}) from Radarr \n`;
+  return movie.imdbId;
+};
+
+const getSonarrResult = async (file, inputs) => {
+  if (!inputs.sonarr_api_key) return null;
+  let api_response = await axios.get(`http://${inputs.sonarr_url}/api/series?apikey=${inputs.sonarr_api_key}`)
+    .then(resp => resp.data)
+    .catch(errorHandler(null));
+
+  // try again using Sonarr v4's api
+  if (!api_response) {
+    api_response = await axios.get(`http://${inputs.sonarr_url}/api/v3/series?apikey=${inputs.sonarr_api_key}`)
+    .then(resp => resp.data)
+    .catch(errorHandler([]));
+  }
+
+  let result = null;
+  for (const show of api_response) {
+    if (show.path) {
+      const sonarrTemp = show.path.replace(/\\/g, '/').split('/');
+      const sonarrFolder = sonarrTemp[sonarrTemp.length - 1];
+      const tdarrTemp = filePath.split('/');
+      const tdarrFolder = tdarrTemp[tdarrTemp.length - 2];
+      if (sonarrFolder === tdarrFolder) {
+        result = show;
+        break;
+      }
+    }
+  }
+
+  if (!result) {
+    response.infoLog += 'Couldn\'t grab ID from Sonarr \n';
+    return null;
+  }
+
+  response.infoLog += `Grabbed ID (${result.imdbId}) from Sonarr \n`;
+  return result.imdbId;
 };
 
 // eslint-disable-next-line no-unused-vars
@@ -229,78 +271,55 @@ const plugin = async (file, librarySettings, inputs, otherArguments) => {
   // eslint-disable-next-line import/no-unresolved
   const axios = require('axios').default;
   response.container = `.${file.container}`;
-  let prio = ['radarr', 'sonarr'];
-  let radarrResult = null;
-  let sonarrResult = null;
-  let tmdbResult = null;
 
-  if (inputs.priority) {
-    if (inputs.priority === 'sonarr') {
-      prio = ['sonarr', 'radarr'];
-    }
-  }
+  const priorities =
+    inputs.priority === 'sonarr' ? ['sonarr', 'radarr', 'imdb']
+    : inputs.priority === 'radarr'? ['radarr', 'sonarr', 'imdb']
+    : inputs.priority === 'imdb' ? ['imdb', 'radarr', 'sonarr']
+    : ['radarr', 'sonarr', 'imdb'];
 
-  for (let i = 0; i < prio.length; i += 1) {
-    let imdbId;
-    // eslint-disable-next-line default-case
-    switch (prio[i]) {
+  let imdbId = null;
+  for (const strategy of priorities) {
+    switch (strategy) {
       case 'radarr':
-        if (tmdbResult) break;
-        if (inputs.radarr_api_key) {
-          radarrResult = await parseArrResponse(
-            await axios.get(`http://${inputs.radarr_url}/api/v3/movie?apiKey=${inputs.radarr_api_key}`)
-              .then((resp) => resp.data),
-            file.meta.FileName, 'radarr',
-          );
+        imdbId = await getRadarrResult(file, inputs);
 
-          if (radarrResult) {
-            imdbId = radarrResult.imdbId;
-            response.infoLog += `Grabbed ID (${imdbId}) from Radarr \n`;
-          } else {
-            response.infoLog += 'Couldn\'t grab ID from Radarr \n';
-            imdbId = file.meta.FileName;
-          }
-          tmdbResult = await tmdbApi(imdbId, inputs.api_key, axios);
-        }
-        break;
       case 'sonarr':
-        if (tmdbResult) break;
-        if (inputs.sonarr_api_key) {
-          sonarrResult = await parseArrResponse(
-            await axios.get(`http://${inputs.sonarr_url}/api/series?apikey=${inputs.sonarr_api_key}`)
-              .then((resp) => resp.data),
-            file.meta.Directory, 'sonarr',
-          );
+        imdbId = await getSonarrResult(file, inputs);
 
-          if (sonarrResult) {
-            imdbId = sonarrResult.imdbId;
-            response.infoLog += `Grabbed ID (${imdbId}) from Sonarr \n`;
-          } else {
-            response.infoLog += 'Couldn\'t grab ID from Sonarr \n';
-            imdbId = file.meta.FileName;
-          }
-          tmdbResult = await tmdbApi(imdbId, inputs.api_key, axios);
-        }
+      case 'imdb':
+        imdbId = file.meta.FileName;
     }
+
+    if (imdbId) break;
   }
 
-  if (tmdbResult) {
-    const tracks = processStreams(tmdbResult, file, inputs.user_langs ? inputs.user_langs.split(',') : '');
+  if (!imdbId) {
+    response.infoLog += 'Failed to find imdbId \n';
+    return response;
+  }
 
-    if (tracks.remove.length > 0) {
-      if (tracks.keep.length > 0) {
-        response.infoLog += `☑Removing tracks with languages: ${tracks.remLangs.slice(0, -2)}. \n`;
-        response.processFile = true;
-        response.infoLog += '\n';
-      } else {
-        response.infoLog += '☒Cancelling plugin otherwise all audio tracks would be removed. \n';
-      }
-    } else {
-      response.infoLog += '☒No audio tracks to be removed. \n';
-    }
-  } else {
+  const tmdbResult = await tmdbApi(imdbId, inputs.api_key, axios)
+    .catch(errorHandler(null));
+
+    if (!tmdbResult) {
     response.infoLog += '☒Couldn\'t find the IMDB id of this file. Skipping. \n';
+    return response;
   }
+
+  const tracks = processStreams(tmdbResult, file, inputs.user_langs ? inputs.user_langs.split(',') : '');
+  if (tracks.remove.length > 0 && tracks.keep.length > 0) {
+    response.infoLog += `☑Removing tracks with languages: ${tracks.remLangs.slice(0, -2)}. \n`;
+    response.processFile = true;
+    response.infoLog += '\n';
+  } else if (tracks.remove.length > 0 && tracks.keep.length == 0) {
+    response.infoLog += '☒Cancelling plugin otherwise all audio tracks would be removed. \n';
+  } else if (tracks.remove.length == 0) {
+    response.infoLog += '☒No audio tracks to be removed. \n';
+  } else {
+    response.infoLog += 'Unknown error occurred. Not removing tracks. \n';
+  }
+
   return response;
 };
 
